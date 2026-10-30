@@ -15,7 +15,23 @@ async function getJson(path) {
 
 export const fetchStatus = () => getJson("/status");
 export const fetchSettlements = () => getJson("/settlements?range=24h");
-export const fetchAccount = (addr) => getJson(`/accounts/${addr.toLowerCase()}`);
+// Follows nextCursor so wallets with more than one page of Squeeks are complete.
+// The cursor pins the same chain snapshot, so pages line up.
+export async function fetchAccount(addr, maxPages = 20) {
+  const base = `/accounts/${addr.toLowerCase()}`;
+  const first = await getJson(base);
+  if (first.status !== "available") return first;
+  const tokens = [...(first.tokens || [])];
+  let cursor = first.nextCursor;
+  for (let i = 1; cursor && i < maxPages; i++) {
+    const page = await getJson(`${base}?cursor=${encodeURIComponent(cursor)}`);
+    if (page.status !== "available") return { ...first, status: "unavailable" }; // never summarize a partial holding
+    tokens.push(...(page.tokens || []));
+    cursor = page.nextCursor;
+  }
+  if (cursor) return { ...first, status: "unavailable" };
+  return { ...first, tokens, nextCursor: null };
+}
 
 export const isAddress = (s) => /^0x[0-9a-fA-F]{40}$/.test((s || "").trim());
 export const shortAddr = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "");

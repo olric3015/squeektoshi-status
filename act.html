@@ -73,13 +73,37 @@
   const short = (a) => a.slice(0, 6) + "…" + a.slice(-4);
   const toSqk = (b) => Number(BigInt(b || "0") / 10n ** 15n) / 1000;
 
+  // Returns the claimable amount, or null when the API can't say (never treat an outage as zero).
   async function loadClaimable(addr) {
     try {
-      const r = await (await fetch(`${API}/accounts/${addr.toLowerCase()}`)).json();
-      const n = toSqk(r.rewards?.claimableBaseUnits);
+      const res = await fetch(`${API}/accounts/${addr.toLowerCase()}`, { cache: "no-store" });
+      const r = res.ok ? await res.json() : null;
+      if (!r || r.status !== "available" || r.rewards?.claimableBaseUnits == null) throw new Error("unavailable");
+      const n = toSqk(r.rewards.claimableBaseUnits);
       $("amt").textContent = n.toLocaleString("en-US", { maximumFractionDigits: 2 });
       return n;
     } catch { $("amt").textContent = "?"; return null; }
+  }
+
+  // Every send path re-checks the network right before it runs.
+  async function onSepolia() {
+    try { return (await ethereum.request({ method: "eth_chainId" })).toLowerCase() === SEPOLIA; } catch { return false; }
+  }
+  async function ensureSepolia() {
+    if (await onSepolia()) return true;
+    try { await ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: SEPOLIA }] }); } catch { return false; }
+    return onSepolia();
+  }
+  function resetConnection(msg) {
+    from = null;
+    $("acct").textContent = "not connected";
+    $("go").textContent = "Connect wallet";
+    $("go").disabled = false;
+    if (msg) say(msg, "err");
+  }
+  if (window.ethereum?.on) {
+    ethereum.on("chainChanged", (id) => { if (from && String(id).toLowerCase() !== SEPOLIA) resetConnection("Your wallet left Sepolia. Connect again to continue."); });
+    ethereum.on("accountsChanged", () => { if (from) resetConnection("Wallet account changed. Connect again to continue."); });
   }
   if (/^0x[0-9a-fA-F]{40}$/.test(p.get("account") || "")) loadClaimable(p.get("account"));
 
@@ -90,13 +114,10 @@
   async function connect() {
     if (!window.ethereum) return say("No wallet found. Open this page in a browser with MetaMask or Rabby.", "err");
     const [a] = await ethereum.request({ method: "eth_requestAccounts" });
+    // Only count as connected once the wallet is actually on Sepolia.
+    if (!(await ensureSepolia())) return resetConnection("Please switch your wallet to the Sepolia network and try again.");
     from = a;
     $("acct").textContent = short(a);
-    try {
-      await ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: SEPOLIA }] });
-    } catch (e) {
-      return say("Please switch your wallet to the Sepolia network and try again.", "err");
-    }
     const watched = (p.get("account") || "").toLowerCase();
     if (watched && watched !== a.toLowerCase()) say(`Heads up: you're connected as ${short(a)}, not the watched ${short(watched)}. Claims go to the connected wallet.`);
     else say("");
@@ -104,16 +125,20 @@
     $("go").textContent = action === "claim" ? "Claim SQK" : "Claim + stake";
     $("go").disabled = n === 0;
     if (n === 0) say("Nothing to claim for this wallet right now.");
+    if (n === null) say("Couldn't read your claimable SQK right now. You can still try: the transaction is checked before anything is sent.");
   }
 
   async function send() {
-    const tx = { from, to: STAKING, data: calldata(from), value: "0x0" };
+    if (!(await onSepolia())) return resetConnection("Your wallet isn't on Sepolia. Connect again to switch.");
+    const call = { from, to: STAKING, data: calldata(from), value: "0x0" };
+    const tx = { ...call, chainId: SEPOLIA }; // wallet refuses to sign if it's on another chain
     say("Checking the transaction…");
     try {
-      await ethereum.request({ method: "eth_call", params: [tx, "latest"] });
+      await ethereum.request({ method: "eth_call", params: [call, "latest"] });
     } catch (e) {
       return say("The contract would reject this right now (" + (e.message || "reverted").slice(0, 120) + "). Nothing was sent.", "err");
     }
+    if (!(await onSepolia())) return resetConnection("Your wallet left Sepolia. Nothing was sent.");
     say("Confirm in your wallet…");
     try {
       const hash = await ethereum.request({ method: "eth_sendTransaction", params: [tx] });

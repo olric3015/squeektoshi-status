@@ -68,6 +68,7 @@ $("watchForm").addEventListener("submit", async (e) => {
   $("addrErr").textContent = "";
   watched = a.toLowerCase();
   await store.set({ watch: watched, lastSummary: null });
+  $("watchForm").classList.add("hidden");
   if (hasChrome) chrome.runtime.sendMessage({ type: "refresh", wallet: true }).catch(() => {});
   loadHolder();
 });
@@ -115,6 +116,9 @@ function renderHolder(s, settings) {
 }
 
 async function loadHolder() {
+  // Don't yank the address form away while someone is typing in it.
+  if (!$("watchForm").classList.contains("hidden") && watched !== null) return;
+  if (!$("watchForm").classList.contains("hidden") && $("addr").value) return;
   const settings = await store.get();
   watched = settings.watch || null;
   if (!watched) return showWatchForm();
@@ -178,6 +182,13 @@ async function loadAlerts() {
   loadAlerts();
   loadHolder();
   loadWheel();
-  if (hasChrome) chrome.runtime.sendMessage({ type: "refresh" }).catch(() => {});
+  if (hasChrome) {
+    chrome.runtime.sendMessage({ type: "refresh" }).catch(() => {});
+    // Re-render when the background worker saves a fresh wallet check.
+    chrome.storage.onChanged.addListener((ch) => { if (ch.lastSummary || ch.watch) loadHolder(); });
+  }
   setInterval(loadWheel, 15000);
+  setInterval(loadHolder, 60000); // keep claimable SQK, pairs and cooldowns fresh while open
+  // Coming back from the claim page or another tab: refresh right away.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { loadHolder(); loadWheel(); } });
 })();
