@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Squeek Keeper",
   "short_name": "Squeek Keeper",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Alerts for your Squeeks: get pinged when they can merge, when SQK is ready to claim, and when Squeektoshi starts running.",
   "icons": {
     "16": "icons/idle-16.png",

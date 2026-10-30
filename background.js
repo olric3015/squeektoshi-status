@@ -82,6 +82,6 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "refresh") refresh({ wallet: !!msg.wallet });
 });
 chrome.notifications.onClicked.addListener((id) => {
-  if (id.startsWith("wake")) chrome.tabs.create({ url: "https://x.com/squeektoshi" });
+  if (id.startsWith("wake")) chrome.tabs.create({ url: "https://sepolia.squeekchain.com/#live" });
   chrome.notifications.clear(id);
 });
